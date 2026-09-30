@@ -1,0 +1,42 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: talentmind-backend
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - DATABASE_URL=file:/app/prisma/prod.db
+      - JWT_SECRET=production-secret-key-talentmind-ai-2026-secure
+      - JWT_EXPIRES_IN=1d
+      - REFRESH_TOKEN_SECRET=production-refresh-secret-talentmind-ai-2026-secure
+      - REFRESH_TOKEN_EXPIRES_IN=7d
+      - FRONTEND_URL=http://localhost
+    ports:
+      - "5000:5000"
+    volumes:
+      - backend-uploads:/app/uploads
+      - backend-db:/app/prisma
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: talentmind-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  backend-uploads:
+  backend-db:

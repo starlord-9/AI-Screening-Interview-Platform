@@ -1,0 +1,437 @@
+// TalentMind AI - Production Microsoft SQL Server / Azure SQL Prisma Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id             String   @id @default(uuid())
+  name           String   @db.NVarChar(255)
+  slug           String   @unique @db.NVarChar(100)
+  logoUrl        String?  @db.NVarChar(1000)
+  website        String?  @db.NVarChar(500)
+  retentionDays  Int      @default(365)
+  allowedDomains String?  @db.NVarChar(1000)
+  settingsJson   String   @default("{}") @db.NVarChar(Max)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users                 User[]
+  jobs                  Job[]
+  candidates            Candidate[]
+  interviews            Interview[]
+  invitations           Invitation[]
+  interviewSessions     InterviewSession[]
+  auditLogs             AuditLog[]
+  dataRetentionPolicies DataRetentionPolicy[]
+  recruiterNotes        RecruiterNote[]
+}
+
+model User {
+  id             String    @id @default(uuid())
+  organizationId String
+  email          String    @unique @db.NVarChar(255)
+  passwordHash   String    @db.NVarChar(255)
+  firstName      String    @db.NVarChar(100)
+  lastName       String    @db.NVarChar(100)
+  roleCode       String    @default("RECRUITER") @db.NVarChar(50)
+  status         String    @default("ACTIVE") @db.NVarChar(50)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recruiterNotes RecruiterNote[]
+}
+
+model Job {
+  id                     String   @id @default(uuid())
+  organizationId         String
+  title                  String   @db.NVarChar(255)
+  department             String   @db.NVarChar(100)
+  location               String   @db.NVarChar(100)
+  employmentType         String   @default("FULL_TIME") @db.NVarChar(50)
+  experienceLevel        String   @default("MID") @db.NVarChar(50)
+  salaryMin              Int?
+  salaryMax              Int?
+  currency               String   @default("USD") @db.NVarChar(10)
+  description            String   @db.NVarChar(Max)
+  responsibilitiesJson   String   @default("[]") @db.NVarChar(Max)
+  requiredSkillsJson     String   @default("[]") @db.NVarChar(Max)
+  preferredSkillsJson    String   @default("[]") @db.NVarChar(Max)
+  education              String?  @db.NVarChar(255)
+  certifications         String?  @db.NVarChar(500)
+  screeningCriteriaJson  String   @default("[]") @db.NVarChar(Max)
+  status                 String   @default("DRAFT") @db.NVarChar(50)
+  interviewDurationMinutes Int    @default(30)
+  interviewMode          String   @default("MIXED") @db.NVarChar(50)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requirements     JobRequirement[]
+  candidateJobs    CandidateJob[]
+  interviews       Interview[]
+}
+
+model JobRequirement {
+  id              String   @id @default(uuid())
+  jobId           String
+  category        String   @db.NVarChar(50)
+  text            String   @db.NVarChar(1000)
+  weight          Float    @default(1.0)
+  isMandatory     Boolean  @default(true)
+  sourceParagraph String?  @db.NVarChar(500)
+  createdAt       DateTime @default(now())
+
+  job            Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  resumeEvidence ResumeEvidence[]
+}
+
+model Candidate {
+  id             String   @id @default(uuid())
+  organizationId String
+  firstName      String   @db.NVarChar(100)
+  lastName       String   @db.NVarChar(100)
+  email          String   @db.NVarChar(255)
+  phone          String?  @db.NVarChar(50)
+  stage          String   @default("APPLIED") @db.NVarChar(50)
+  notes          String?  @db.NVarChar(Max)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidateJobs     CandidateJob[]
+  resumes           Resume[]
+  invitations       Invitation[]
+  interviewSessions InterviewSession[]
+  stageHistory      CandidateStageHistory[]
+  recruiterNotes    RecruiterNote[]
+  consentRecords    ConsentRecord[]
+}
+
+model CandidateJob {
+  id           String    @id @default(uuid())
+  candidateId  String
+  jobId        String
+  appliedAt    DateTime  @default(now())
+  currentStage String    @default("APPLIED") @db.NVarChar(50)
+  matchScore   Float?
+  createdAt    DateTime  @default(now())
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, jobId])
+}
+
+model Resume {
+  id             String   @id @default(uuid())
+  candidateId    String
+  fileName       String   @db.NVarChar(255)
+  fileUrl        String?  @db.NVarChar(1000)
+  fileSizeBytes  Int      @default(0)
+  mimeType       String   @default("application/pdf") @db.NVarChar(100)
+  rawText        String   @db.NVarChar(Max)
+  parsedDataJson String   @default("{}") @db.NVarChar(Max)
+  skillsJson     String   @default("[]") @db.NVarChar(Max)
+  experienceJson String   @default("[]") @db.NVarChar(Max)
+  educationJson  String   @default("[]") @db.NVarChar(Max)
+  certificationsJson String @default("[]") @db.NVarChar(Max)
+  createdAt      DateTime @default(now())
+
+  candidate Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  evidence  ResumeEvidence[]
+}
+
+model ResumeEvidence {
+  id               String   @id @default(uuid())
+  resumeId         String
+  jobRequirementId String
+  quote            String   @db.NVarChar(Max)
+  section          String   @db.NVarChar(100)
+  confidenceScore  Float    @default(0.85)
+  matchLevel       String   @default("STRONG") @db.NVarChar(50)
+  gapAnalysis      String?  @db.NVarChar(Max)
+  createdAt        DateTime @default(now())
+
+  resume         Resume         @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  jobRequirement JobRequirement @relation(fields: [jobRequirementId], references: [id], onDelete: Cascade)
+}
+
+model Interview {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  jobId              String
+  title              String   @db.NVarChar(255)
+  description        String   @db.NVarChar(Max)
+  version            Int      @default(1)
+  isPublished        Boolean  @default(false)
+  timeLimitMinutes   Int      @default(30)
+  totalQuestions     Int      @default(0)
+  scoringRubricJson  String   @default("{\"technicalWeight\":40,\"problemSolvingWeight\":25,\"communicationWeight\":20,\"behavioralWeight\":15}") @db.NVarChar(Max)
+  createdBy          String?  @db.NVarChar(255)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  job          Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  questions    InterviewQuestion[]
+  invitations  Invitation[]
+  sessions     InterviewSession[]
+}
+
+model InterviewQuestion {
+  id                 String   @id @default(uuid())
+  interviewId        String
+  orderIndex         Int
+  questionText       String   @db.NVarChar(Max)
+  category           String   @db.NVarChar(50)
+  difficulty         String   @default("MEDIUM") @db.NVarChar(50)
+  expectedCompetency String   @db.NVarChar(100)
+  timeLimitSeconds   Int      @default(180)
+  answerType         String   @default("VIDEO") @db.NVarChar(50)
+  isRequired         Boolean  @default(true)
+  scoringCriteriaJson String  @default("{}") @db.NVarChar(Max)
+  followUpRulesJson  String   @default("[]") @db.NVarChar(Max)
+  codeStarterSnippet String?  @db.NVarChar(Max)
+  codeTestCasesJson  String?  @db.NVarChar(Max)
+  createdAt          DateTime @default(now())
+
+  interview Interview           @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  responses InterviewResponse[]
+}
+
+model Invitation {
+  id             String    @id @default(uuid())
+  organizationId String
+  candidateId    String
+  interviewId    String
+  tokenHash      String    @unique @db.NVarChar(128)
+  rawTokenHint   String    @db.NVarChar(10)
+  status         String    @default("PENDING") @db.NVarChar(50)
+  expiresAt      DateTime
+  consentedAt    DateTime?
+  singleUseStart Boolean   @default(false)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidate    Candidate          @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  interview    Interview          @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  sessions     InterviewSession[]
+  consentRecords ConsentRecord[]
+}
+
+model InterviewSession {
+  id                   String    @id @default(uuid())
+  invitationId         String
+  candidateId          String
+  interviewId          String
+  organizationId       String
+  status               String    @default("CREATED") @db.NVarChar(50)
+  currentQuestionIndex Int       @default(0)
+  startedAt            DateTime?
+  lastActivityAt       DateTime?
+  completedAt          DateTime?
+  browserInfoJson      String    @default("{}") @db.NVarChar(Max)
+  deviceMetadataJson   String    @default("{}") @db.NVarChar(Max)
+  ipAddress            String?   @db.NVarChar(50)
+  attemptNumber        Int       @default(1)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  invitation   Invitation          @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  candidate    Candidate           @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  interview    Interview           @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  responses    InterviewResponse[]
+  integrityEvents IntegrityEvent[]
+}
+
+model InterviewResponse {
+  id               String    @id @default(uuid())
+  sessionId        String
+  questionId       String
+  responseMode     String    @default("VIDEO") @db.NVarChar(50)
+  textContent      String?   @db.NVarChar(Max)
+  codeLanguage     String?   @db.NVarChar(50)
+  codeSubmitted    String?   @db.NVarChar(Max)
+  testCasesPassed  Int?
+  testCasesTotal   Int?
+  durationSeconds  Int       @default(0)
+  submittedAt      DateTime  @default(now())
+  status           String    @default("SUBMITTED") @db.NVarChar(50)
+
+  session    InterviewSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question   InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  recordings Recording[]
+  transcript Transcript?
+  evaluation Evaluation?
+}
+
+model Recording {
+  id              String   @id @default(uuid())
+  responseId      String
+  sessionId       String
+  candidateId     String
+  durationSeconds Int      @default(0)
+  mimeType        String   @default("video/webm") @db.NVarChar(100)
+  blobKey         String   @db.NVarChar(500)
+  blobUrl         String?  @db.NVarChar(1000)
+  fileSizeBytes   Int      @default(0)
+  status          String   @default("COMPLETED") @db.NVarChar(50)
+  createdAt       DateTime @default(now())
+
+  response InterviewResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+}
+
+model Transcript {
+  id           String   @id @default(uuid())
+  responseId   String   @unique
+  sessionId    String
+  fullText     String   @db.NVarChar(Max)
+  segmentsJson String   @default("[]") @db.NVarChar(Max)
+  confidence   Float    @default(0.92)
+  language     String   @default("en-US") @db.NVarChar(20)
+  status       String   @default("COMPLETED") @db.NVarChar(50)
+  createdAt    DateTime @default(now())
+
+  response InterviewResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+}
+
+model Evaluation {
+  id                 String    @id @default(uuid())
+  responseId         String    @unique
+  sessionId          String
+  competency         String    @db.NVarChar(100)
+  summary            String    @db.NVarChar(Max)
+  quoteEvidenceJson  String    @default("[]") @db.NVarChar(Max)
+  strengthsJson      String    @default("[]") @db.NVarChar(Max)
+  gapsJson           String    @default("[]") @db.NVarChar(Max)
+  score              Float
+  maxScore           Float     @default(5.0)
+  confidence         String    @default("MEDIUM") @db.NVarChar(20)
+  isOverridden       Boolean   @default(false)
+  humanScore         Float?
+  overrideReason     String?   @db.NVarChar(Max)
+  overriddenBy       String?   @db.NVarChar(100)
+  overriddenAt       DateTime?
+  modelIdentifier    String    @default("gpt-4o-recruitment-eval") @db.NVarChar(100)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  response InterviewResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+}
+
+model IntegrityEvent {
+  id              String   @id @default(uuid())
+  sessionId       String
+  candidateId     String
+  eventType       String   @db.NVarChar(100)
+  timestamp       DateTime @default(now())
+  durationSeconds Int      @default(0)
+  source          String   @default("BROWSER") @db.NVarChar(50)
+  facts           String   @db.NVarChar(Max)
+  evidence        String?  @db.NVarChar(Max)
+  uncertainty     String   @default("MEDIUM") @db.NVarChar(20)
+  browser         String?  @db.NVarChar(100)
+  device          String?  @db.NVarChar(100)
+  severity        String   @default("INFO") @db.NVarChar(20)
+  reviewStatus    String   @default("UNREVIEWED") @db.NVarChar(50)
+  reviewerId      String?  @db.NVarChar(100)
+  reviewComment   String?  @db.NVarChar(Max)
+  resolution      String?  @db.NVarChar(100)
+  createdAt       DateTime @default(now())
+
+  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model CandidateStageHistory {
+  id            String   @id @default(uuid())
+  candidateId   String
+  previousStage String   @db.NVarChar(50)
+  newStage      String   @db.NVarChar(50)
+  changedBy     String?  @db.NVarChar(100)
+  note          String?  @db.NVarChar(Max)
+  createdAt     DateTime @default(now())
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model RecruiterNote {
+  id             String   @id @default(uuid())
+  candidateId    String
+  organizationId String
+  userId         String
+  noteText       String   @db.NVarChar(Max)
+  isPrivate      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  candidate    Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id             String    @id @default(uuid())
+  organizationId String
+  recipientEmail String    @db.NVarChar(255)
+  subject        String    @db.NVarChar(255)
+  type           String    @db.NVarChar(50)
+  payloadJson    String    @default("{}") @db.NVarChar(Max)
+  status         String    @default("SENT") @db.NVarChar(50)
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  actorId        String?  @db.NVarChar(100)
+  actorEmail     String?  @db.NVarChar(255)
+  action         String   @db.NVarChar(100)
+  entity         String   @db.NVarChar(100)
+  entityId       String   @db.NVarChar(100)
+  metadataJson   String   @default("{}") @db.NVarChar(Max)
+  ipAddress      String?  @db.NVarChar(50)
+  userAgent      String?  @db.NVarChar(500)
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model ConsentRecord {
+  id                         String   @id @default(uuid())
+  candidateId                String
+  invitationId               String
+  policyVersion              String   @default("2026.1") @db.NVarChar(50)
+  consentedToRecording       Boolean  @default(true)
+  consentedToAIAnalysis      Boolean  @default(true)
+  consentedToIntegritySignals Boolean @default(true)
+  ipAddress                  String?  @db.NVarChar(50)
+  userAgent                  String?  @db.NVarChar(500)
+  consentedAt                DateTime @default(now())
+
+  candidate  Candidate  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  invitation Invitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+}
+
+model DataRetentionPolicy {
+  id                      String   @id @default(uuid())
+  organizationId          String
+  resumeRetentionDays     Int      @default(180)
+  recordingRetentionDays  Int      @default(90)
+  transcriptRetentionDays Int      @default(365)
+  auditRetentionDays      Int      @default(730)
+  autoDeleteEnabled       Boolean  @default(true)
+  updatedAt               DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}

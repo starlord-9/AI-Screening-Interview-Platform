@@ -1,0 +1,438 @@
+// TalentMind AI - Prisma Schema
+// Dual-ready for SQLite (local dev & testing) and Microsoft SQL Server / Azure SQL (production)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id             String   @id @default(uuid())
+  name           String
+  slug           String   @unique
+  logoUrl        String?
+  website        String?
+  retentionDays  Int      @default(365)
+  allowedDomains String?  // comma-separated or JSON
+  settingsJson   String   @default("{}") // AI prompts, thresholds, scoring weights
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users                 User[]
+  jobs                  Job[]
+  candidates            Candidate[]
+  interviews            Interview[]
+  invitations           Invitation[]
+  interviewSessions     InterviewSession[]
+  auditLogs             AuditLog[]
+  dataRetentionPolicies DataRetentionPolicy[]
+  recruiterNotes        RecruiterNote[]
+}
+
+model User {
+  id             String    @id @default(uuid())
+  organizationId String
+  email          String    @unique
+  passwordHash   String
+  firstName      String
+  lastName       String
+  roleCode       String    @default("RECRUITER") // ADMIN, ORG_OWNER, RECRUITER, HIRING_MANAGER, INTERVIEWER
+  status         String    @default("ACTIVE") // ACTIVE, INVITED, SUSPENDED
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recruiterNotes RecruiterNote[]
+}
+
+model Job {
+  id                     String   @id @default(uuid())
+  organizationId         String
+  title                  String
+  department             String
+  location               String
+  employmentType         String   @default("FULL_TIME") // FULL_TIME, PART_TIME, CONTRACT
+  experienceLevel        String   @default("MID")       // ENTRY, MID, SENIOR, LEAD, EXECUTIVE
+  salaryMin              Int?
+  salaryMax              Int?
+  currency               String   @default("USD")
+  description            String
+  responsibilitiesJson   String   @default("[]")
+  requiredSkillsJson     String   @default("[]")
+  preferredSkillsJson    String   @default("[]")
+  education              String?
+  certifications         String?
+  screeningCriteriaJson  String   @default("[]")
+  status                 String   @default("DRAFT") // DRAFT, ACTIVE, PAUSED, CLOSED
+  interviewDurationMinutes Int    @default(30)
+  interviewMode          String   @default("MIXED") // TEXT, AUDIO, VIDEO, MIXED, CODING
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requirements     JobRequirement[]
+  candidateJobs    CandidateJob[]
+  interviews       Interview[]
+}
+
+model JobRequirement {
+  id              String   @id @default(uuid())
+  jobId           String
+  category        String   // TECHNICAL, SOFT_SKILL, DOMAIN, EDUCATION, EXPERIENCE
+  text            String
+  weight          Float    @default(1.0)
+  isMandatory     Boolean  @default(true)
+  sourceParagraph String?
+  createdAt       DateTime @default(now())
+
+  job            Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  resumeEvidence ResumeEvidence[]
+}
+
+model Candidate {
+  id             String   @id @default(uuid())
+  organizationId String
+  firstName      String
+  lastName       String
+  email          String
+  phone          String?
+  stage          String   @default("APPLIED") // APPLIED, SCREENING, INTERVIEW, TECHNICAL, HIRING_MANAGER, FINAL_REVIEW, SELECTED, REJECTED, WITHDRAWN
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidateJobs     CandidateJob[]
+  resumes           Resume[]
+  invitations       Invitation[]
+  interviewSessions InterviewSession[]
+  stageHistory      CandidateStageHistory[]
+  recruiterNotes    RecruiterNote[]
+  consentRecords    ConsentRecord[]
+}
+
+model CandidateJob {
+  id           String    @id @default(uuid())
+  candidateId  String
+  jobId        String
+  appliedAt    DateTime  @default(now())
+  currentStage String    @default("APPLIED")
+  matchScore   Float?
+  createdAt    DateTime  @default(now())
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, jobId])
+}
+
+model Resume {
+  id             String   @id @default(uuid())
+  candidateId    String
+  fileName       String
+  fileUrl        String?
+  fileSizeBytes  Int      @default(0)
+  mimeType       String   @default("application/pdf")
+  rawText        String
+  parsedDataJson String   @default("{}") // Extracted summary, contact, etc.
+  skillsJson     String   @default("[]")
+  experienceJson String   @default("[]")
+  educationJson  String   @default("[]")
+  certificationsJson String @default("[]")
+  createdAt      DateTime @default(now())
+
+  candidate Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  evidence  ResumeEvidence[]
+}
+
+model ResumeEvidence {
+  id               String   @id @default(uuid())
+  resumeId         String
+  jobRequirementId String
+  quote            String
+  section          String   // WORK_HISTORY, EDUCATION, SKILLS, PROJECTS
+  confidenceScore  Float    @default(0.85)
+  matchLevel       String   @default("STRONG") // STRONG, MODERATE, WEAK, NONE
+  gapAnalysis      String?
+  createdAt        DateTime @default(now())
+
+  resume         Resume         @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  jobRequirement JobRequirement @relation(fields: [jobRequirementId], references: [id], onDelete: Cascade)
+}
+
+model Interview {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  jobId              String
+  title              String
+  description        String
+  version            Int      @default(1)
+  isPublished        Boolean  @default(false)
+  timeLimitMinutes   Int      @default(30)
+  totalQuestions     Int      @default(0)
+  scoringRubricJson  String   @default("{\"technicalWeight\":40,\"problemSolvingWeight\":25,\"communicationWeight\":20,\"behavioralWeight\":15}")
+  createdBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  job          Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  questions    InterviewQuestion[]
+  invitations  Invitation[]
+  sessions     InterviewSession[]
+}
+
+model InterviewQuestion {
+  id                 String   @id @default(uuid())
+  interviewId        String
+  orderIndex         Int
+  questionText       String
+  category           String   // INTRODUCTION, RESUME_VALIDATION, TECHNICAL, PROBLEM_SOLVING, BEHAVIORAL, SITUATIONAL, CODING, CANDIDATE_QUESTIONS
+  difficulty         String   @default("MEDIUM") // EASY, MEDIUM, HARD
+  expectedCompetency String
+  timeLimitSeconds   Int      @default(180)
+  answerType         String   @default("VIDEO") // TEXT, AUDIO, VIDEO, CODING, MULTIPLE_CHOICE
+  isRequired         Boolean  @default(true)
+  scoringCriteriaJson String  @default("{}") // rubric, expected points
+  followUpRulesJson  String   @default("[]") // dynamic follow-up guidelines
+  codeStarterSnippet String?  // For coding questions
+  codeTestCasesJson  String?  // JSON test cases: [{input, expectedOutput, description}]
+  createdAt          DateTime @default(now())
+
+  interview Interview           @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  responses InterviewResponse[]
+}
+
+model Invitation {
+  id             String    @id @default(uuid())
+  organizationId String
+  candidateId    String
+  interviewId    String
+  tokenHash      String    @unique
+  rawTokenHint   String    // Safe last 6 chars for display
+  status         String    @default("PENDING") // PENDING, OPENED, CONSENTED, IN_PROGRESS, COMPLETED, REVOKED, EXPIRED
+  expiresAt      DateTime
+  consentedAt    DateTime?
+  singleUseStart Boolean   @default(false)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidate    Candidate          @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  interview    Interview          @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  sessions     InterviewSession[]
+  consentRecords ConsentRecord[]
+}
+
+model InterviewSession {
+  id                   String    @id @default(uuid())
+  invitationId         String
+  candidateId          String
+  interviewId          String
+  organizationId       String
+  status               String    @default("CREATED") // CREATED, READY, ACTIVE, PAUSED, INTERRUPTED, COMPLETED, LOCKED, EXPIRED
+  currentQuestionIndex Int       @default(0)
+  startedAt            DateTime?
+  lastActivityAt       DateTime?
+  completedAt          DateTime?
+  browserInfoJson      String    @default("{}")
+  deviceMetadataJson   String    @default("{}")
+  ipAddress            String?
+  attemptNumber        Int       @default(1)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  invitation   Invitation          @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  candidate    Candidate           @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  interview    Interview           @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  responses    InterviewResponse[]
+  integrityEvents IntegrityEvent[]
+}
+
+model InterviewResponse {
+  id               String    @id @default(uuid())
+  sessionId        String
+  questionId       String
+  responseMode     String    @default("VIDEO") // TEXT, AUDIO, VIDEO, CODING
+  textContent      String?
+  codeLanguage     String?
+  codeSubmitted    String?
+  testCasesPassed  Int?
+  testCasesTotal   Int?
+  durationSeconds  Int       @default(0)
+  submittedAt      DateTime  @default(now())
+  status           String    @default("SUBMITTED") // SUBMITTED, PROCESSING, TRANSCRIBED, EVALUATED
+
+  session    InterviewSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question   InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  recordings Recording[]
+  transcript Transcript?
+  evaluation Evaluation?
+}
+
+model Recording {
+  id              String   @id @default(uuid())
+  responseId      String
+  sessionId       String
+  candidateId     String
+  durationSeconds Int      @default(0)
+  mimeType        String   @default("video/webm")
+  blobKey         String
+  blobUrl         String?  // Signed temporary URL or stream endpoint
+  fileSizeBytes   Int      @default(0)
+  status          String   @default("COMPLETED") // UPLOADING, UPLOADED, PROCESSING, COMPLETED, FAILED
+  createdAt       DateTime @default(now())
+
+  response InterviewResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+}
+
+model Transcript {
+  id           String   @id @default(uuid())
+  responseId   String   @unique
+  sessionId    String
+  fullText     String
+  segmentsJson String   @default("[]") // [{text: string, startMs: number, endMs: number, confidence: number}]
+  confidence   Float    @default(0.92)
+  language     String   @default("en-US")
+  status       String   @default("COMPLETED") // PENDING, PROCESSING, COMPLETED, FAILED
+  createdAt    DateTime @default(now())
+
+  response InterviewResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+}
+
+model Evaluation {
+  id                 String    @id @default(uuid())
+  responseId         String    @unique
+  sessionId          String
+  competency         String
+  summary            String
+  quoteEvidenceJson  String    @default("[]") // [{quote: string, timestampStart: number, timestampEnd: number}]
+  strengthsJson      String    @default("[]")
+  gapsJson           String    @default("[]")
+  score              Float     // Dimension score, e.g. 1-5
+  maxScore           Float     @default(5.0)
+  confidence         String    @default("MEDIUM") // LOW, MEDIUM, HIGH
+  isOverridden       Boolean   @default(false)
+  humanScore         Float?
+  overrideReason     String?
+  overriddenBy       String?
+  overriddenAt       DateTime?
+  modelIdentifier    String    @default("gpt-4o-recruitment-eval")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  response InterviewResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+}
+
+model IntegrityEvent {
+  id              String   @id @default(uuid())
+  sessionId       String
+  candidateId     String
+  eventType       String   // TAB_HIDDEN, WINDOW_BLUR, FULLSCREEN_EXIT, SCREEN_SHARE_STARTED, SCREEN_SHARE_STOPPED, CAMERA_CHANGED, MICROPHONE_CHANGED, CLIPBOARD_COPY, CLIPBOARD_PASTE, NETWORK_INTERRUPTION, MULTIPLE_SESSION_ATTEMPT, DUPLICATE_SUBMISSION, UNEXPECTED_AUDIO_ACTIVITY
+  timestamp       DateTime @default(now())
+  durationSeconds Int      @default(0)
+  source          String   @default("BROWSER") // BROWSER, WEBRTC, AUDIO_STREAM, SYSTEM
+  facts           String   // Neutral objective description
+  evidence        String?  // Technical details (e.g. blur duration: 8s)
+  uncertainty     String   @default("MEDIUM") // LOW, MEDIUM, HIGH
+  browser         String?
+  device          String?
+  severity        String   @default("INFO") // INFO, LOW, MEDIUM, HIGH
+  reviewStatus    String   @default("UNREVIEWED") // UNREVIEWED, REVIEWED, DISMISSED, ACTIONED
+  reviewerId      String?
+  reviewComment   String?
+  resolution      String?
+  createdAt       DateTime @default(now())
+
+  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model CandidateStageHistory {
+  id            String   @id @default(uuid())
+  candidateId   String
+  previousStage String
+  newStage      String
+  changedBy     String?
+  note          String?
+  createdAt     DateTime @default(now())
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model RecruiterNote {
+  id             String   @id @default(uuid())
+  candidateId    String
+  organizationId String
+  userId         String
+  noteText       String
+  isPrivate      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  candidate    Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id             String    @id @default(uuid())
+  organizationId String
+  recipientEmail String
+  subject        String
+  type           String    // INVITATION, REMINDER, INTERVIEW_COMPLETED, REVIEW_READY
+  payloadJson    String    @default("{}")
+  status         String    @default("SENT") // PENDING, SENT, FAILED
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  actorId        String?
+  actorEmail     String?
+  action         String   // USER_CREATED, ROLE_CHANGED, JOB_CREATED, etc.
+  entity         String
+  entityId       String
+  metadataJson   String   @default("{}")
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model ConsentRecord {
+  id                         String   @id @default(uuid())
+  candidateId                String
+  invitationId               String
+  policyVersion              String   @default("2026.1")
+  consentedToRecording       Boolean  @default(true)
+  consentedToAIAnalysis      Boolean  @default(true)
+  consentedToIntegritySignals Boolean @default(true)
+  ipAddress                  String?
+  userAgent                  String?
+  consentedAt                DateTime @default(now())
+
+  candidate  Candidate  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  invitation Invitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+}
+
+model DataRetentionPolicy {
+  id                      String   @id @default(uuid())
+  organizationId          String
+  resumeRetentionDays     Int      @default(180)
+  recordingRetentionDays  Int      @default(90)
+  transcriptRetentionDays Int      @default(365)
+  auditRetentionDays      Int      @default(730)
+  autoDeleteEnabled       Boolean  @default(true)
+  updatedAt               DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
